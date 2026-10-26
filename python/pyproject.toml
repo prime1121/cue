@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sao-turn"
+version = "0.1.0"
+description = "Asyncio and Pipecat bridge for Cue turn detection"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/saolabsai/cue"
+Issues = "https://github.com/saolabsai/cue/issues"
+
+[project.optional-dependencies]
+pipecat = ["pipecat-ai==1.12.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

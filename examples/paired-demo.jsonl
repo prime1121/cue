@@ -1,0 +1,2 @@
+{"id":"synthetic-complete","reference_end_ms":1200,"baseline_end_ms":500,"candidate_end_ms":1400,"baseline_inference_ms":[60.0],"candidate_inference_ms":[60.0]}
+{"id":"synthetic-incomplete","reference_end_ms":null,"baseline_end_ms":700,"candidate_end_ms":null,"baseline_inference_ms":[61.0],"candidate_inference_ms":[61.0]}

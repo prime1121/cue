@@ -1,0 +1,5 @@
+{
+  "mode": "digits",
+  "expected_digits": 10,
+  "agent_speaking": false
+}

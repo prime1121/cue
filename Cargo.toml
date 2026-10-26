@@ -1,0 +1,34 @@
+[package]
+name = "sao-turn"
+default-run = "sao-turn"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Cue: streaming CPU turn detection for voice agents"
+repository = "https://github.com/saolabsai/cue"
+readme = "README.md"
+keywords = ["audio", "turn-detection", "voice", "vad"]
+categories = ["multimedia::audio"]
+license = "MIT"
+publish = false
+
+[lib]
+name = "sao_turn"
+
+[[bin]]
+name = "sao-turn"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hound = "3.5"
+ndarray = "0.16"
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic", "ndarray"] }
+ort-sys = { version = "=2.0.0-rc.9", default-features = false }
+rustfft = "6.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
