@@ -78,7 +78,7 @@ def main():
         if environment.get("CARGO_BUILD_TARGET"):
             raise ValueError("Verification requires a native build; unset CARGO_BUILD_TARGET")
         cargo = executable(args.cargo)
-        run("models", [sys.executable, ROOT / "scripts/prepare_models.py", "--check"])
+        run("model-checksums", [sys.executable, ROOT / "scripts/prepare_models.py", "--check"])
         runtime = native_runtime()
         environment["ORT_DYLIB_PATH"] = str(runtime)
         run("rust-format", [cargo, "fmt", "--", "--check"])
