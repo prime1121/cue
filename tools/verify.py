@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def executable(value):
     resolved = shutil.which(value) or value
-    path = Path(resolved).expanduser().resolve(strict=True)
+    path = Path(resolved).expanduser().absolute()
     if not path.is_file():
         raise ValueError(f"Not an executable file: {value}")
     return str(path)
@@ -72,6 +72,7 @@ def main():
                                 "log": log.name})
         print(("PASS " if passed else "FAIL ") + name, flush=True)
         if not passed:
+            print(log.read_text(encoding="utf-8", errors="replace")[-12000:], file=sys.stderr)
             raise RuntimeError(f"Check failed; inspect {log.name}")
 
     try:
