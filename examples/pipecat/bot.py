@@ -1,0 +1,153 @@
+"""Pipecat voice bot whose user turns follow Cue decisions instead of Pipecat's VAD."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+from loguru import logger
+from pipecat.frames.frames import (
+    BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame, InterimTranscriptionFrame,
+    InterruptionFrame, LLMRunFrame, ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame,
+    TranscriptionFrame,
+)
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair, LLMUserAggregatorParams
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
+
+from sao_turn import SaoTurnClient, TurnConfig
+from sao_turn.pipecat import SaoTurnProcessor, TurnObservationFrame
+
+ROOT = Path(__file__).resolve().parents[2]
+CONFIG = ROOT / "configs/live-conversation.json"
+VOICE = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+INSTRUCTIONS = (
+    "You are a friendly voice assistant. Greet the user when the conversation starts. "
+    "Answer in one or two short spoken sentences. If the user asks you to stop or wait, "
+    "acknowledge it in a few words."
+)
+
+load_dotenv(override=True)
+
+
+class CueTurnTaking(FrameProcessor):
+    """Proposes Pipecat user turns from Cue observations.
+
+    Transcripts heard while the bot speaks are held until Cue rules on them: a
+    backchannel drops them, and an interrupt or end replays them into the turn.
+    """
+
+    def __init__(self, config: TurnConfig, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._config = config
+        self._bot_speaking = False
+        self._user_turn = False
+        self._speech_started_ms: int | None = None
+        self._held: list[Frame] = []
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TurnObservationFrame):
+            await self._observe(frame.payload)
+            return
+        if isinstance(frame, (BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+            self._bot_speaking = isinstance(frame, BotStartedSpeakingFrame)
+        elif isinstance(frame, (InterimTranscriptionFrame, TranscriptionFrame)) and self._bot_speaking and not self._user_turn:
+            self._held.append(frame)
+            return
+        await self.push_frame(frame, direction)
+
+    async def _observe(self, payload: dict[str, Any]) -> None:
+        if self._speech_started_ms is None and payload["speech_probability"] >= self._config.speech_start_threshold:
+            self._speech_started_ms = payload["at_ms"]
+        elif self._speech_started_ms is not None and payload["speech_probability"] <= self._config.speech_end_threshold:
+            self._speech_started_ms = None
+        decision = payload["decision"] or {}
+        kind = decision.get("kind")
+        if kind:
+            logger.info(f"Cue {kind}: {decision['reason']}")
+        if kind == "backchannel":
+            self._held.clear()
+            return
+        if not self._user_turn and (kind in ("interrupt", "end") or self._speech_takes_floor(payload["at_ms"])):
+            self._user_turn = True
+            self._bot_speaking = False
+            # Downstream only: an upstream interruption would cancel SaoTurnProcessor mid-request.
+            await self.push_frame(InterruptionFrame())
+            await self.push_frame(ProposedUserStartedSpeakingFrame())
+            for held in self._held:
+                await self.push_frame(held)
+            self._held.clear()
+        if kind == "end":
+            self._user_turn = False
+            await self.push_frame(ProposedUserStoppedSpeakingFrame())
+
+    def _speech_takes_floor(self, at_ms: int) -> bool:
+        if self._speech_started_ms is None:
+            return False
+        speech_ms = at_ms - self._speech_started_ms
+        # While the bot talks, only speech longer than any backchannel takes the floor.
+        if self._bot_speaking:
+            return speech_ms > self._config.max_backchannel_ms
+        return speech_ms >= self._config.min_voiced_ms
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
+    executable = ROOT / "target/release" / ("sao-turn.exe" if os.name == "nt" else "sao-turn")
+    cue = SaoTurnClient(
+        executable=os.getenv("SAO_TURN_NATIVE_EXE") or executable,
+        model=os.getenv("SAO_TURN_MODEL") or ROOT / "assets/models/smart-turn-v3.2-cpu.onnx",
+        vad_model=os.getenv("SAO_TURN_VAD") or ROOT / "assets/models/silero-vad.onnx",
+        runtime=os.getenv("SAO_TURN_RUNTIME") or None,
+        config=CONFIG,
+    )
+    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    llm = OpenAILLMService(
+        api_key=os.environ["OPENAI_API_KEY"], settings=OpenAILLMService.Settings(system_instruction=INSTRUCTIONS),
+    )
+    tts = CartesiaTTSService(api_key=os.environ["CARTESIA_API_KEY"], settings=CartesiaTTSService.Settings(voice=VOICE))
+    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+        LLMContext(),
+        user_params=LLMUserAggregatorParams(user_turn_strategies=ExternalUserTurnStrategies(enable_interruptions=False)),
+    )
+    config = TurnConfig.from_dict(json.loads(CONFIG.read_text(encoding="utf-8")))
+    task = PipelineTask(Pipeline([
+        transport.input(), stt, SaoTurnProcessor(cue), CueTurnTaking(config),
+        user_aggregator, llm, tts, transport.output(), assistant_aggregator,
+    ]))
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport: BaseTransport, client: Any) -> None:
+        await task.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport: BaseTransport, client: Any) -> None:
+        await task.cancel()
+
+    await PipelineRunner(handle_sigint=runner_args.handle_sigint).run(task)
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    transport = await create_transport(
+        runner_args, {"webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True)},
+    )
+    await run_bot(transport, runner_args)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

@@ -1,0 +1,2 @@
+livekit-agents[cartesia,deepgram,openai]==1.8.9
+python-dotenv==1.2.4

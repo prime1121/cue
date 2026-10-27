@@ -21,20 +21,9 @@ The Pipecat adapter is pinned/tested against Pipecat 1.12.0. Base client tests
 can run without it using `python -m unittest discover -s tests -p test_client.py -v`.
 Normal tests simulate native subprocess pipes; one native test is opt-in.
 
-```python
-from sao_turn.client import SaoTurnClient
-from sao_turn.pipecat import SaoTurnProcessor, TurnContextFrame, TurnObservationFrame
-
-client = SaoTurnClient(
-    executable="/absolute/path/to/sao-turn",
-    model="/absolute/path/to/smart-turn-v3.2-cpu.onnx",
-    vad_model="/absolute/path/to/silero-vad.onnx",
-    runtime="/absolute/path/to/onnxruntime-library",
-)
-processor = SaoTurnProcessor(client)
-# Supply continuous mono 16 kHz PCM16 audio, including silence.
-# Consume TurnObservationFrame.payload in a downstream processor.
-```
+[examples/pipecat](../examples/pipecat) runs `SaoTurnProcessor` in a complete
+voice bot, and [examples/livekit](../examples/livekit) drives `SaoTurnClient`
+from a LiveKit agent. Both turn Cue's decisions into the framework's user turns.
 
 `StartFrame` is forwarded after native readiness. Original audio passes through
 unchanged and each native 32 ms observation produces `TurnObservationFrame`.
