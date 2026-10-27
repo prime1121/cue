@@ -71,7 +71,8 @@ Each packet gets one response containing `frames` and `buffered_samples`.
 Frames are 512 samples / 32 ms. Supply continuous audio, including silence.
 See the [streaming contract](docs/STREAMING.md) for context updates, reset
 semantics, the Rust API, and policy settings. For Python and Pipecat, see the
-[Python bridge](python/README.md).
+[Python bridge](python/README.md). Runnable [Pipecat](examples/pipecat) and
+[LiveKit](examples/livekit) voice agents are in `examples/`.
 
 ## Benchmarks
 
@@ -94,7 +95,7 @@ quality dataset is bundled.
 | `python/` | Async subprocess client and optional Pipecat adapter |
 | `scripts/` | Pinned model downloader and its tests |
 | `assets/frontend/` | Deterministic synthetic fixtures used by default tests |
-| `configs/`, `examples/` | Policy settings and replay examples |
+| `configs/`, `examples/` | Policy settings, replay examples, and Pipecat and LiveKit voice agents |
 | `docs/` | Streaming API, development, and evaluation guides |
 | `vendor/` | Reference frontend code, fixture generator, and upstream notices |
 
