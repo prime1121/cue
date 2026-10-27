@@ -34,10 +34,10 @@ Build the worker and download the models as described in the
 ```console
 python -m venv .venv-pipecat
 .venv-pipecat/bin/python -m pip install -e "./python[pipecat]" -r examples/pipecat/requirements.txt
-cp examples/pipecat/.env.example examples/pipecat/.env
+cp examples/pipecat/.env.example .env
 ```
 
-Add the provider API keys to `examples/pipecat/.env` and set `SAO_TURN_RUNTIME`
+Add the provider API keys to `.env` and set `SAO_TURN_RUNTIME`
 to the native ONNX Runtime library. Pipecat installs `onnxruntime==1.24.4` in the
 same environment, so the library is in its `site-packages/onnxruntime/capi`
 folder, for example `libonnxruntime.1.24.4.dylib` on macOS. Start the bot and

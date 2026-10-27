@@ -33,10 +33,10 @@ from the repository root:
 ```console
 python -m venv .venv-livekit
 .venv-livekit/bin/python -m pip install -e ./python -r examples/livekit/requirements.txt
-cp examples/livekit/.env.example examples/livekit/.env
+cp examples/livekit/.env.example .env
 ```
 
-Fill in `examples/livekit/.env` with your LiveKit project URL and keys, the
+Fill in `.env` with your LiveKit project URL and keys, the
 provider API keys, and `SAO_TURN_RUNTIME`. Start the agent, then join a room in
 that project from any LiveKit client; LiveKit dispatches the agent to it:
 
