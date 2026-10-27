@@ -35,7 +35,9 @@ Each client owns one persistent subprocess with one request in flight,
 deadlines, bounded stderr, and bounded JSON responses. Timeout, cancellation,
 and protocol failure close/reap it to avoid response misalignment. Standalone
 clients require an explicit `start()` after failure. A failed Pipecat processor
-becomes unusable and reports an upstream error.
+becomes unusable and reports an upstream error. An `InterruptionFrame` still
+drops the frame in progress, but its context or reset request finishes first,
+so an interruption alone never closes the worker.
 
 `TurnContextFrame(context=...)` replaces context. Supply `TurnContext` or a
 mapping containing `agent_speaking`, `mode` (`conversation` or `digits`),
