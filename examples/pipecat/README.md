@@ -23,8 +23,9 @@ its observations into Pipecat user turns, using the thresholds from
 Transcripts heard while the bot speaks are held until Cue rules on them, so a
 backchannel never reaches the LLM. The user aggregator uses
 `ExternalUserTurnStrategies` without interruptions, and `CueTurnTaking` sends
-its `InterruptionFrame` downstream only: an interruption travelling upstream can
-cancel `SaoTurnProcessor` in the middle of a native request.
+its `InterruptionFrame` downstream only: an interruption travelling upstream
+would make Pipecat drop a transcript that `SaoTurnProcessor` is still handling,
+and the LLM would never receive those words.
 
 ## Run
 

@@ -85,7 +85,7 @@ class CueTurnTaking(FrameProcessor):
         if not self._user_turn and (kind in ("interrupt", "end") or self._speech_takes_floor(payload["at_ms"])):
             self._user_turn = True
             self._bot_speaking = False
-            # Downstream only: an upstream interruption would cancel SaoTurnProcessor mid-request.
+            # Downstream only: an upstream interruption would drop a transcript SaoTurnProcessor is still handling.
             await self.push_frame(InterruptionFrame())
             await self.push_frame(ProposedUserStartedSpeakingFrame())
             for held in self._held:
