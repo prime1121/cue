@@ -103,10 +103,7 @@ class SaoTurnProcessor(FrameProcessor):
 
             if isinstance(frame, TurnResetFrame):
                 async with self._context_lock:
-                    self._require_started()
-                    context = TurnContext.from_value(frame.context)
-                    await self._client.reset(context)
-                    self._context = context
+                    await self._set_context(TurnContext.from_value(frame.context), reset=True)
                 await self.push_frame(frame, direction)
                 return
 
@@ -142,27 +139,38 @@ class SaoTurnProcessor(FrameProcessor):
                 return
 
             await self.push_frame(frame, direction)
-        except asyncio.CancelledError:
-            await asyncio.shield(self._client.close())
-            self._started = False
-            raise
         except Exception as error:
-            self._failed = True
-            self._started = False
-            await self._client.close()
-            await self.push_error(
-                f"Sao Turn bridge failed: {error}", exception=error,
-                force_treat_as_permanent=True,
-            )
+            await self._fail(error)
+
+    async def _fail(self, error: BaseException) -> None:
+        self._failed = True
+        self._started = False
+        await self._client.close()
+        await self.push_error(
+            f"Sao Turn bridge failed: {error}", exception=error,
+            force_treat_as_permanent=True,
+        )
 
     def _require_started(self) -> None:
         if not self._started:
             raise RuntimeError("SaoTurnProcessor has not received a successful StartFrame")
 
-    async def _set_context(self, context: TurnContext) -> None:
+    async def _set_context(self, context: TurnContext, *, reset: bool = False) -> None:
         self._require_started()
-        await self._client.update_context(context)
-        self._context = context
+
+        async def exchange() -> None:
+            await (self._client.reset(context) if reset else self._client.update_context(context))
+            self._context = context
+
+        # Interruptions cancel Pipecat's process task; an abandoned JSONL exchange would close the worker.
+        task = asyncio.create_task(exchange())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await asyncio.wait({task})
+            if task.exception() is not None:
+                await self._fail(task.exception())
+            raise
 
     async def cleanup(self) -> None:
         try:
