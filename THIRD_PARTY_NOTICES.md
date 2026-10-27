@@ -18,6 +18,7 @@ The unmodified reference frontend is kept as
 test inputs. Those inputs are not recordings or conversational quality data.
 
 Rust and optional Python dependencies retain their own licenses. Their
-versions are recorded in `Cargo.lock` and `python/pyproject.toml`. Native ONNX
-Runtime is installed separately; retain its distribution's notices when
-redistributing it.
+versions are recorded in `Cargo.lock` and `python/pyproject.toml`; the voice
+agent examples pin theirs in `examples/pipecat/requirements.txt` and
+`examples/livekit/requirements.txt`. Native ONNX Runtime is installed
+separately; retain its distribution's notices when redistributing it.
