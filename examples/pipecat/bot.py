@@ -7,10 +7,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+import av
+import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame, InterimTranscriptionFrame,
+    BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame, InputAudioRawFrame, InterimTranscriptionFrame,
     InterruptionFrame, LLMRunFrame, ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame,
     TranscriptionFrame, VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame,
 )
@@ -43,6 +45,28 @@ INSTRUCTIONS = (
 )
 
 load_dotenv(override=True)
+
+
+class ResampleForCue(FrameProcessor):
+    """Converts microphone audio captured at 48 kHz for Hush to the 16 kHz that Cue requires.
+
+    libswresample, which the WebRTC transport also uses, holds back about 1 ms of audio.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._resampler = av.AudioResampler(format="s16", layout="mono", rate=16_000)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, InputAudioRawFrame) and frame.sample_rate != 16_000:
+            audio = av.AudioFrame.from_ndarray(np.frombuffer(frame.audio, "<i2").reshape(1, -1), format="s16", layout="mono")
+            audio.sample_rate = frame.sample_rate
+            frame.audio = b"".join(resampled.to_ndarray().tobytes() for resampled in self._resampler.resample(audio))
+            frame.sample_rate = 16_000
+            if not frame.audio:
+                return
+        await self.push_frame(frame, direction)
 
 
 class CueTurnTaking(FrameProcessor):
@@ -153,7 +177,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     )
     config = TurnConfig.from_dict(json.loads(CONFIG.read_text(encoding="utf-8")))
     task = PipelineTask(Pipeline([
-        transport.input(), stt, SaoTurnProcessor(cue), CueTurnTaking(config),
+        transport.input(), ResampleForCue(), stt, SaoTurnProcessor(cue), CueTurnTaking(config),
         user_aggregator, llm, tts, transport.output(), assistant_aggregator,
     ]))
 
@@ -168,10 +192,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     await PipelineRunner(handle_sigint=runner_args.handle_sigint).run(task)
 
 
-async def bot(runner_args: RunnerArguments) -> None:
-    transport = await create_transport(
-        runner_args, {"webrtc": lambda: TransportParams(audio_in_enabled=True, audio_out_enabled=True)},
+def transport_params() -> TransportParams:
+    """Adds Hush noise reduction when SAO_DENOISE_EXE names a built sao-denoise binary."""
+    if not os.getenv("SAO_DENOISE_EXE"):
+        return TransportParams(audio_in_enabled=True, audio_out_enabled=True)
+    from sao_noise.pipecat import DeepFilterNetFilter
+
+    # Hush's DeepFilterNet3 model works on 48 kHz audio; ResampleForCue converts its output for Cue and STT.
+    return TransportParams(
+        audio_in_enabled=True, audio_out_enabled=True, audio_in_sample_rate=48_000,
+        audio_in_filter=DeepFilterNetFilter(os.environ["SAO_DENOISE_EXE"]),
     )
+
+
+async def bot(runner_args: RunnerArguments) -> None:
+    transport = await create_transport(runner_args, {"webrtc": transport_params})
     await run_bot(transport, runner_args)
 
 

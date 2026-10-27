@@ -55,6 +55,23 @@ On Windows, use `.venv-pipecat\Scripts\python.exe`. The worker and models
 default to `target/release` and `assets/models`; override them with
 `SAO_TURN_NATIVE_EXE`, `SAO_TURN_MODEL`, and `SAO_TURN_VAD`.
 
+## Noise reduction (optional)
+
+[Hush](https://github.com/saolabsai/hush) removes background noise before Cue
+and Deepgram hear the caller. Clone it next to this repository, build it as its
+README describes, and install its Python package into the same environment:
+
+```console
+.venv-pipecat/bin/python -m pip install -e ../hush/python
+```
+
+Set `SAO_DENOISE_EXE` in `.env` to the absolute path of the built
+`sao-denoise` binary. The bot then captures the browser audio at 48 kHz, Hush
+cleans it, and `ResampleForCue` converts it to the 16 kHz that Cue requires.
+Hush delays the audio by about 30 ms plus processing time, and it reduces noise
+only: it does not cancel echo or remove other voices. Without `SAO_DENOISE_EXE`,
+the bot uses the microphone audio as it arrives.
+
 ## Limits
 
 Use headphones or a client with echo cancellation: the worker hears whatever
