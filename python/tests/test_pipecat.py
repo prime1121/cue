@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import unittest
 
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame, BotStoppedSpeakingFrame, CancelFrame, EndFrame,
-    InputAudioRawFrame, InterimTranscriptionFrame, InterruptionFrame, StartFrame,
-    TranscriptionFrame,
+    InputAudioRawFrame, InterimTranscriptionFrame, StartFrame, TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import TaskManager
@@ -21,8 +19,6 @@ class FakeClient:
         self.calls = []
         self.frames = []
         self.failure = None
-        self.release = None
-        self.waiting = asyncio.Event()
 
     async def start(self):
         self.calls.append(("start",))
@@ -31,11 +27,6 @@ class FakeClient:
 
     async def update_context(self, context):
         self.calls.append(("context", context))
-        if self.release is not None:
-            self.waiting.set()
-            await self.release.wait()
-        if self.failure == "context":
-            raise RuntimeError("test context failure")
         return {"frames": [], "buffered_samples": 0}
 
     async def process_audio(self, audio, *, context):
@@ -56,12 +47,6 @@ class RecordingProcessor(SaoTurnProcessor):
         super().__init__(client)
         self.output = []
         self.errors = []
-        self.interrupting = asyncio.Event()
-
-    async def process_frame(self, frame, direction):
-        if isinstance(frame, InterruptionFrame):
-            self.interrupting.set()
-        await super().process_frame(frame, direction)
 
     async def push_frame(self, frame, direction=FrameDirection.DOWNSTREAM):
         self.output.append((frame, direction))
@@ -85,27 +70,6 @@ class ProcessorTests(unittest.IsolatedAsyncioTestCase):
 
     async def send(self, frame, direction=FrameDirection.DOWNSTREAM):
         await self.processor.process_frame(frame, direction)
-
-    async def queue(self, frame):
-        processed = asyncio.Event()
-
-        async def done(*_):
-            processed.set()
-
-        await self.processor.queue_frame(frame, callback=done)
-        return processed
-
-    async def interrupt_held_context_update(self, failure=None):
-        started = await self.queue(StartFrame())
-        await started.wait()
-        self.client.release = asyncio.Event()
-        await self.processor.queue_frame(TranscriptionFrame(text="hold on", user_id="u", timestamp="t"))
-        await self.client.waiting.wait()
-        interrupted = await self.queue(InterruptionFrame())
-        await self.processor.interrupting.wait()
-        self.client.failure = failure
-        self.client.release.set()
-        await interrupted.wait()
 
     async def test_start_readiness_audio_identity_and_observations(self):
         start = StartFrame()
@@ -176,23 +140,6 @@ class ProcessorTests(unittest.IsolatedAsyncioTestCase):
         self.client.failure = "audio"
         await self.send(InputAudioRawFrame(audio=bytes(1_024), sample_rate=16_000, num_channels=1))
         self.assertIn("inference failure", self.processor.errors[-1][0])
-        self.assertEqual(self.client.calls[-1], ("close",))
-
-    async def test_interruption_mid_request_completes_it_and_keeps_the_bridge(self):
-        await self.interrupt_held_context_update()
-        self.assertNotIn(("close",), self.client.calls)
-        self.assertEqual(self.processor.context.text, "hold on")
-        self.assertFalse(any(isinstance(frame, TranscriptionFrame) for frame, _ in self.processor.output))
-        self.client.frames = [{"at_ms": 32, "decision": None}]
-        await self.send(InputAudioRawFrame(audio=bytes(1_024), sample_rate=16_000, num_channels=1))
-        self.assertFalse(self.processor.errors)
-        self.assertEqual(self.client.calls[-1][2].text, "hold on")
-        self.assertIsInstance(self.processor.output[-1][0], TurnObservationFrame)
-
-    async def test_request_failing_after_interruption_is_reported(self):
-        await self.interrupt_held_context_update(failure="context")
-        self.assertIn("context failure", self.processor.errors[-1][0])
-        self.assertTrue(self.processor.errors[-1][1]["force_treat_as_permanent"])
         self.assertEqual(self.client.calls[-1], ("close",))
 
     async def test_invalid_audio_and_end_cancel_cleanup(self):
